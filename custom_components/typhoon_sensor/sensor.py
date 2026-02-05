@@ -9,8 +9,10 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import async_timeout
 from bs4 import BeautifulSoup
 from haversine import haversine
+import logging
 
 DOMAIN = "typhoon_sensor"
+_LOGGER = logging.getLogger(__name__)
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the Typhoon Sensor platform."""
@@ -48,14 +50,18 @@ class TyphoonSensor(Entity):
 
     async def async_update(self):
         """Fetch new state data for the sensor."""
+        _LOGGER.debug("Starting async_update for Typhoon Sensor")
         url = "https://www.pagasa.dost.gov.ph/tropical-cyclone/severe-weather-bulletin"
         
         session = async_get_clientsession(self.hass)
         try:
             async with async_timeout.timeout(10):
+                _LOGGER.debug("Requesting URL: %s", url)
                 async with session.get(url) as response:
+                    _LOGGER.debug("Response status: %s", response.status)
                     if response.status == 200:
                         html = await response.text()
+                        _LOGGER.debug("Response received, length: %d", len(html))
                         soup = BeautifulSoup(html, 'html.parser')
                         # TODO: Parse the HTML to extract typhoon data
                         typhoon_data = self._parse_typhoon_data(soup)
@@ -67,8 +73,12 @@ class TyphoonSensor(Entity):
                             "next_eye_distance": typhoon_data.get("next_eye_distance"),
                             "typhoon_details": typhoon_data.get("details")
                         }
-        except Exception:
+                        _LOGGER.debug("Update finished. State: %s, Attributes: %s", self._state, self._attributes)
+                    else:
+                        _LOGGER.warning("Failed to fetch data: %s", response.status)
+        except Exception as err:
              # Handle timeouts or other errors appropriately for HA (usually just log and keep old state or set to unavailable)
+             _LOGGER.error("Error updating typhoon sensor: %s", err)
              self._state = "Unavailable"
 
     def _parse_typhoon_data(self, soup):

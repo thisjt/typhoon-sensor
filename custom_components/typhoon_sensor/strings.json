@@ -1,0 +1,14 @@
+{
+	"config": {
+		"step": {
+			"user": {
+				"title": "Configure Typhoon Sensor",
+				"description": "Set up the Typhoon Sensor integration by providing your home coordinates.",
+				"data": {
+					"latitude": "Home Latitude",
+					"longitude": "Home Longitude"
+				}
+			}
+		}
+	}
+}
