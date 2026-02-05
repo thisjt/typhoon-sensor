@@ -4,6 +4,12 @@
 	"version": "1.0.0",
 	"documentation": "https://github.com/thisjt/typhoon-sensor",
 	"dependencies": [],
-	"codeowners": ["@thisjt"],
-	"requirements": []
+	"codeowners": [
+		"@thisjt"
+	],
+	"requirements": [
+		"requests",
+		"haversine",
+		"beautifulsoup4"
+	]
 }
