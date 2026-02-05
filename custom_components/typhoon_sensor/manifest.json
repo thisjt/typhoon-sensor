@@ -5,5 +5,5 @@
 	"documentation": "https://github.com/thisjt/typhoon-sensor",
 	"dependencies": [],
 	"codeowners": ["@thisjt"],
-	"requirements": ["requests", "haversine", "beautifulsoup4"]
+	"requirements": []
 }
