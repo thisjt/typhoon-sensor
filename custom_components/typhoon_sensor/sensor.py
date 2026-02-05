@@ -98,8 +98,10 @@ class TyphoonSensor(Entity):
             classification = "Unknown"
             if typhoon_name_tag:
                 full_text = typhoon_name_tag.get_text(strip=True)
+                _LOGGER.debug("Full text: %s", full_text)
                 if '"' in full_text:
                     parts = full_text.split('"')
+                    _LOGGER.debug("Parts: %s", parts)
                     if len(parts) >= 2:
                         classification = parts[0].strip()
                         typhoon_name = parts[1].strip()
