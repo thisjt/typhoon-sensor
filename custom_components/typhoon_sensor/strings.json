@@ -2,13 +2,19 @@
 	"config": {
 		"step": {
 			"user": {
-				"title": "Configure Typhoon Sensor",
-				"description": "Set up the Typhoon Sensor integration by providing your home coordinates.",
+				"title": "Typhoon Sensor Setup",
+				"description": "Please enter the coordinates for the Typhoon Sensor.",
 				"data": {
-					"latitude": "Home Latitude",
-					"longitude": "Home Longitude"
+					"latitude": "Latitude",
+					"longitude": "Longitude"
 				}
 			}
+		},
+		"error": {
+			"cannot_connect": "Failed to connect"
+		},
+		"abort": {
+			"already_configured": "Device is already configured"
 		}
 	}
 }

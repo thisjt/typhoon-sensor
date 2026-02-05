@@ -3,9 +3,10 @@ Platform for Typhoon Sensor integration.
 """
 
 from homeassistant.helpers.entity import Entity
-from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, CoordinatorEntity
-
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import async_timeout
 from bs4 import BeautifulSoup
@@ -14,23 +15,21 @@ from datetime import timedelta
 import logging
 import re
 
-DOMAIN = "typhoon_sensor"
+from .const import DOMAIN
+
 SCAN_INTERVAL = timedelta(minutes=30)
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     """Set up the Typhoon Sensor platform."""
-    home_lat = config.get(CONF_LATITUDE, hass.config.latitude)
-    home_lon = config.get(CONF_LONGITUDE, hass.config.longitude)
-
-    coordinator = TyphoonDataCoordinator(hass, home_lat, home_lon)
-    await coordinator.async_config_entry_first_refresh()
+    coordinator = hass.data[DOMAIN][entry.entry_id]
 
     sensors = [
-        TyphoonNameSensor(coordinator),
-        TyphoonClassificationSensor(coordinator),
-        TyphoonDistanceSensor(coordinator),
-        TyphoonDetailsSensor(coordinator),
+        TyphoonNameSensor(coordinator, entry),
+        TyphoonClassificationSensor(coordinator, entry),
+        TyphoonDistanceSensor(coordinator, entry),
+        TyphoonLastDistanceSensor(coordinator, entry),
+        TyphoonDetailsSensor(coordinator, entry),
     ]
     async_add_entities(sensors, True)
 
@@ -40,6 +39,8 @@ class TyphoonDataCoordinator(DataUpdateCoordinator):
     def __init__(self, hass, home_lat, home_lon):
         """Initialize."""
         self.home_coords = (home_lat, home_lon)
+        # Initialize last_recorded_distance with None or a default value
+        self.last_recorded_distance = None
         super().__init__(
             hass,
             _LOGGER,
@@ -62,7 +63,34 @@ class TyphoonDataCoordinator(DataUpdateCoordinator):
                         html = await response.text()
                         _LOGGER.debug("Response received, length: %d", len(html))
                         soup = BeautifulSoup(html, 'html.parser')
-                        return self._parse_typhoon_data(soup)
+                        data = self._parse_typhoon_data(soup)
+                        
+                        # Update last_recorded_distance logic
+                        current_distance = data.get("distance")
+                        
+                        # If we have a current distance, update last_recorded_distance
+                        # But we need to handle the case where this is the FIRST run.
+                        # If it's the first run (last is None), set last to current.
+                        # If it's not the first run, we keep the previous 'last' until... 
+                        # actually, the requirement is "last distance recorded once the distance updates".
+                        # This implies we need to store the PREVIOUS value before updating the current one.
+                        
+                        # However, _async_update_data returns the NEW state.
+                        # So we need to store the OLD state somewhere before returning the NEW state.
+                        # But wait, self.data holds the OLD state (from previous update).
+                        
+                        if self.data and "distance" in self.data:
+                             # We have previous data
+                             previous_distance = self.data["distance"]
+                             if previous_distance is not None:
+                                 self.last_recorded_distance = previous_distance
+                        
+                        # If last_recorded_distance is still None (first run), make it equal to current
+                        if self.last_recorded_distance is None and current_distance is not None:
+                            self.last_recorded_distance = current_distance
+
+                        data["last_distance"] = self.last_recorded_distance
+                        return data
                     else:
                         _LOGGER.warning("Failed to fetch data: %s", response.status)
                         return self._get_empty_data()
@@ -75,6 +103,7 @@ class TyphoonDataCoordinator(DataUpdateCoordinator):
             "name": "No typhoon detected",
             "classification": "None",
             "distance": None,
+            "last_distance": self.last_recorded_distance,
             "details": "No active typhoon detected"
         }
 
@@ -167,19 +196,35 @@ class TyphoonDataCoordinator(DataUpdateCoordinator):
             }
         
         _LOGGER.debug("No typhoons detected or parsed")
-        return self._get_empty_data()
+        return {
+            "name": "No typhoon detected",
+            "classification": "None",
+            "distance": None,
+            "details": "No active typhoon detected"
+        }
 
 
 class TyphoonBaseSensor(CoordinatorEntity, Entity):
     """Base class for Typhoon sensors."""
     
-    def __init__(self, coordinator):
+    def __init__(self, coordinator, entry):
         super().__init__(coordinator)
         self._coordinator = coordinator
+        self._entry = entry
 
     @property
     def available(self):
         return self._coordinator.last_update_success
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+            "name": "Typhoon Sensor",
+            "manufacturer": "PAGASA",
+            "model": "Typhoon Monitor",
+            "entry_type": "service",
+        }
 
 class TyphoonNameSensor(TyphoonBaseSensor):
     @property
@@ -188,7 +233,7 @@ class TyphoonNameSensor(TyphoonBaseSensor):
     
     @property
     def unique_id(self):
-        return f"{DOMAIN}_name"
+        return f"{self._entry.entry_id}_name"
     
     @property
     def state(self):
@@ -205,7 +250,7 @@ class TyphoonClassificationSensor(TyphoonBaseSensor):
     
     @property
     def unique_id(self):
-        return f"{DOMAIN}_classification"
+        return f"{self._entry.entry_id}_classification"
     
     @property
     def state(self):
@@ -222,7 +267,7 @@ class TyphoonDistanceSensor(TyphoonBaseSensor):
     
     @property
     def unique_id(self):
-        return f"{DOMAIN}_distance"
+        return f"{self._entry.entry_id}_distance"
     
     @property
     def state(self):
@@ -237,6 +282,28 @@ class TyphoonDistanceSensor(TyphoonBaseSensor):
     def icon(self):
         return "mdi:map-marker-distance"
 
+class TyphoonLastDistanceSensor(TyphoonBaseSensor):
+    @property
+    def name(self):
+        return "Typhoon Last Recorded Distance"
+    
+    @property
+    def unique_id(self):
+        return f"{self._entry.entry_id}_last_distance"
+    
+    @property
+    def state(self):
+        dist = self._coordinator.data.get("last_distance")
+        return round(dist, 2) if dist else None
+    
+    @property
+    def unit_of_measurement(self):
+        return "km"
+        
+    @property
+    def icon(self):
+        return "mdi:history"
+
 class TyphoonDetailsSensor(TyphoonBaseSensor):
     @property
     def name(self):
@@ -244,7 +311,7 @@ class TyphoonDetailsSensor(TyphoonBaseSensor):
     
     @property
     def unique_id(self):
-        return f"{DOMAIN}_details"
+        return f"{self._entry.entry_id}_details"
     
     @property
     def state(self):
