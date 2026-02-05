@@ -90,25 +90,31 @@ class TyphoonSensor(Entity):
         # Find the relevant section containing typhoon information
         typhoon_sections = soup.find_all("div", class_="tropical-cyclone-weather-bulletin-page")
         for section in typhoon_sections:
+            _LOGGER.debug("Processing section: %s", section)
             # Extract typhoon name
             typhoon_name_tag = section.find("h3")
+            _LOGGER.debug("Typhoon name tag: %s", typhoon_name_tag)
             typhoon_name = typhoon_name_tag.get_text(strip=True) if typhoon_name_tag else "Unknown"
 
             # Extract details
             details_tag = section.find("p")
+            _LOGGER.debug("Details tag: %s", details_tag)
             details = details_tag.get_text(strip=True) if details_tag else "No details available"
 
             # Extract coordinates from the details (example: "Lat: 12.3, Lon: 123.4")
             lat, lon = None, None
             for line in details.split("\n"):
+                _LOGGER.debug("Line: %s", line)
                 if "Lat:" in line and "Lon:" in line:
                     try:
                         lat = float(line.split("Lat:")[1].split(",")[0].strip())
                         lon = float(line.split("Lon:")[1].strip())
+                        _LOGGER.debug("Lat: %s, Lon: %s", lat, lon)
                     except (ValueError, IndexError):
                         continue
 
             if lat is not None and lon is not None:
+                _LOGGER.debug("Adding typhoon: %s", typhoon_name)
                 typhoons.append({
                     "name": typhoon_name,
                     "coordinates": (lat, lon),
@@ -118,13 +124,16 @@ class TyphoonSensor(Entity):
         # Find the nearest typhoon to the home coordinates
         nearest_typhoon = None
         nearest_distance = float("inf")
+        _LOGGER.debug("Home coordinates: %s", self._home_coords)
         for typhoon in typhoons:
             distance = haversine(self._home_coords, typhoon["coordinates"])
+            _LOGGER.debug("Typhoon: %s, Distance: %s", typhoon["name"], distance)
             if distance < nearest_distance:
                 nearest_distance = distance
                 nearest_typhoon = typhoon
 
         if nearest_typhoon:
+            _LOGGER.debug("Nearest typhoon: %s", nearest_typhoon["name"])
             return {
                 "nearest_typhoon_name": nearest_typhoon["name"],
                 "last_eye_distance": nearest_distance,
