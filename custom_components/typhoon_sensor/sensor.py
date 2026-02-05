@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 from haversine import haversine
 from datetime import timedelta
 import logging
+import re
 
 DOMAIN = "typhoon_sensor"
 SCAN_INTERVAL = timedelta(minutes=30)
@@ -90,28 +91,46 @@ class TyphoonSensor(Entity):
         # Find the relevant section containing typhoon information
         typhoon_sections = soup.find_all("div", class_="tropical-cyclone-weather-bulletin-page")
         for section in typhoon_sections:
-            _LOGGER.debug("Processing section: %s", section)
             # Extract typhoon name
             typhoon_name_tag = section.find("h3")
             _LOGGER.debug("Typhoon name tag: %s", typhoon_name_tag)
-            typhoon_name = typhoon_name_tag.get_text(strip=True) if typhoon_name_tag else "Unknown"
+            if typhoon_name_tag:
+                full_text = typhoon_name_tag.get_text(strip=True)
+                if '"' in full_text:
+                    typhoon_name = full_text.split('"')[1]
+                else:
+                    typhoon_name = full_text
+            else:
+                typhoon_name = "Unknown"
 
             # Extract details
             details_tag = section.find("p")
             _LOGGER.debug("Details tag: %s", details_tag)
             details = details_tag.get_text(strip=True) if details_tag else "No details available"
 
-            # Extract coordinates from the details (example: "Lat: 12.3, Lon: 123.4")
+            # Extract coordinates from the details (example: "Lat: 12.3, Lon: 123.4" or "(08.7 °N, 127.2 °E )")
             lat, lon = None, None
-            for line in details.split("\n"):
-                _LOGGER.debug("Line: %s", line)
-                if "Lat:" in line and "Lon:" in line:
-                    try:
-                        lat = float(line.split("Lat:")[1].split(",")[0].strip())
-                        lon = float(line.split("Lon:")[1].strip())
-                        _LOGGER.debug("Lat: %s, Lon: %s", lat, lon)
-                    except (ValueError, IndexError):
-                        continue
+            
+            # Try regex match first for (Lat °N, Lon °E) format
+            match = re.search(r'\(\s*(\d+\.\d+)\s*°N,\s*(\d+\.\d+)\s*°E\s*\)', details)
+            if match:
+                try:
+                    lat = float(match.group(1))
+                    lon = float(match.group(2))
+                    _LOGGER.debug("Coordinates found via regex: Lat=%s, Lon=%s", lat, lon)
+                except ValueError:
+                     _LOGGER.warning("Regex matched but failed to parse floats")
+
+            if lat is None or lon is None:
+                for line in details.split("\n"):
+                    _LOGGER.debug("Line: %s", line)
+                    if "Lat:" in line and "Lon:" in line:
+                        try:
+                            lat = float(line.split("Lat:")[1].split(",")[0].strip())
+                            lon = float(line.split("Lon:")[1].strip())
+                            _LOGGER.debug("Lat: %s, Lon: %s", lat, lon)
+                        except (ValueError, IndexError):
+                            continue
 
             if lat is not None and lon is not None:
                 _LOGGER.debug("Adding typhoon: %s", typhoon_name)
