@@ -74,6 +74,7 @@ class TyphoonSensor(Entity):
                         self._attributes = {
                             "last_eye_distance": typhoon_data.get("last_eye_distance"),
                             "next_eye_distance": typhoon_data.get("next_eye_distance"),
+                            "classification": typhoon_data.get("classification"),
                             "typhoon_details": typhoon_data.get("details")
                         }
                         _LOGGER.debug("Update finished. State: %s, Attributes: %s", self._state, self._attributes)
@@ -91,13 +92,19 @@ class TyphoonSensor(Entity):
         # Find the relevant section containing typhoon information
         typhoon_sections = soup.find_all("div", class_="tropical-cyclone-weather-bulletin-page")
         for section in typhoon_sections:
-            # Extract typhoon name
+            # Extract typhoon name and classification
             typhoon_name_tag = section.find("h3")
             _LOGGER.debug("Typhoon name tag: %s", typhoon_name_tag)
+            classification = "Unknown"
             if typhoon_name_tag:
                 full_text = typhoon_name_tag.get_text(strip=True)
                 if '"' in full_text:
-                    typhoon_name = full_text.split('"')[1]
+                    parts = full_text.split('"')
+                    if len(parts) >= 2:
+                        classification = parts[0].strip()
+                        typhoon_name = parts[1].strip()
+                    else:
+                        typhoon_name = full_text
                 else:
                     typhoon_name = full_text
             else:
@@ -133,9 +140,10 @@ class TyphoonSensor(Entity):
                             continue
 
             if lat is not None and lon is not None:
-                _LOGGER.debug("Adding typhoon: %s", typhoon_name)
+                _LOGGER.debug("Adding typhoon: %s (%s)", typhoon_name, classification)
                 typhoons.append({
                     "name": typhoon_name,
+                    "classification": classification,
                     "coordinates": (lat, lon),
                     "details": details
                 })
