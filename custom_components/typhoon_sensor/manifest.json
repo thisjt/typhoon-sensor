@@ -8,7 +8,6 @@
 		"@thisjt"
 	],
 	"requirements": [
-		"requests",
 		"haversine",
 		"beautifulsoup4"
 	]

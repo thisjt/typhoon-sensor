@@ -4,7 +4,9 @@ Platform for Typhoon Sensor integration.
 
 from homeassistant.helpers.entity import Entity
 from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE
-import requests
+
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+import async_timeout
 from bs4 import BeautifulSoup
 from haversine import haversine
 
@@ -15,14 +17,15 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     home_lat = config.get(CONF_LATITUDE, hass.config.latitude)
     home_lon = config.get(CONF_LONGITUDE, hass.config.longitude)
 
-    sensors = [TyphoonSensor(home_lat, home_lon)]
+    sensors = [TyphoonSensor(hass, home_lat, home_lon)]
     async_add_entities(sensors, True)
 
 class TyphoonSensor(Entity):
     """Representation of a Typhoon Sensor."""
 
-    def __init__(self, home_lat, home_lon):
+    def __init__(self, hass, home_lat, home_lon):
         """Initialize the sensor."""
+        self.hass = hass
         self._state = None
         self._home_coords = (home_lat, home_lon)
         self._name = "Typhoon Sensor"
@@ -46,19 +49,27 @@ class TyphoonSensor(Entity):
     async def async_update(self):
         """Fetch new state data for the sensor."""
         url = "https://www.pagasa.dost.gov.ph/tropical-cyclone/severe-weather-bulletin"
-        response = requests.get(url)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            # TODO: Parse the HTML to extract typhoon data
-            typhoon_data = self._parse_typhoon_data(soup)
+        
+        session = async_get_clientsession(self.hass)
+        try:
+            async with async_timeout.timeout(10):
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        html = await response.text()
+                        soup = BeautifulSoup(html, 'html.parser')
+                        # TODO: Parse the HTML to extract typhoon data
+                        typhoon_data = self._parse_typhoon_data(soup)
 
-            # Example: Update state and attributes
-            self._state = typhoon_data.get("nearest_typhoon_name", "Unknown")
-            self._attributes = {
-                "last_eye_distance": typhoon_data.get("last_eye_distance"),
-                "next_eye_distance": typhoon_data.get("next_eye_distance"),
-                "typhoon_details": typhoon_data.get("details")
-            }
+                        # Example: Update state and attributes
+                        self._state = typhoon_data.get("nearest_typhoon_name", "Unknown")
+                        self._attributes = {
+                            "last_eye_distance": typhoon_data.get("last_eye_distance"),
+                            "next_eye_distance": typhoon_data.get("next_eye_distance"),
+                            "typhoon_details": typhoon_data.get("details")
+                        }
+        except Exception:
+             # Handle timeouts or other errors appropriately for HA (usually just log and keep old state or set to unavailable)
+             self._state = "Unavailable"
 
     def _parse_typhoon_data(self, soup):
         """Parse the PAGASA HTML to extract typhoon data."""
