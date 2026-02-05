@@ -4,6 +4,7 @@ Platform for Typhoon Sensor integration.
 
 from homeassistant.helpers.entity import Entity
 from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, CoordinatorEntity
 
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import async_timeout
@@ -22,38 +23,33 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     home_lat = config.get(CONF_LATITUDE, hass.config.latitude)
     home_lon = config.get(CONF_LONGITUDE, hass.config.longitude)
 
-    sensors = [TyphoonSensor(hass, home_lat, home_lon)]
+    coordinator = TyphoonDataCoordinator(hass, home_lat, home_lon)
+    await coordinator.async_config_entry_first_refresh()
+
+    sensors = [
+        TyphoonNameSensor(coordinator),
+        TyphoonClassificationSensor(coordinator),
+        TyphoonDistanceSensor(coordinator),
+        TyphoonDetailsSensor(coordinator),
+    ]
     async_add_entities(sensors, True)
 
-class TyphoonSensor(Entity):
-    """Representation of a Typhoon Sensor."""
+class TyphoonDataCoordinator(DataUpdateCoordinator):
+    """Class to manage fetching Typhoon data."""
 
     def __init__(self, hass, home_lat, home_lon):
-        """Initialize the sensor."""
-        self.hass = hass
-        self._state = None
-        self._home_coords = (home_lat, home_lon)
-        self._name = "Typhoon Sensor"
-        self._attributes = {}
+        """Initialize."""
+        self.home_coords = (home_lat, home_lon)
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=SCAN_INTERVAL,
+        )
 
-    @property
-    def name(self):
-        """Return the name of the sensor."""
-        return self._name
-
-    @property
-    def state(self):
-        """Return the state of the sensor."""
-        return self._state
-
-    @property
-    def extra_state_attributes(self):
-        """Return the state attributes."""
-        return self._attributes
-
-    async def async_update(self):
-        """Fetch new state data for the sensor."""
-        _LOGGER.debug("Starting async_update for Typhoon Sensor")
+    async def _async_update_data(self):
+        """Fetch data from API endpoint."""
+        _LOGGER.debug("Starting async_update for Typhoon Coordinator")
         url = "https://www.pagasa.dost.gov.ph/tropical-cyclone/severe-weather-bulletin"
         
         session = async_get_clientsession(self.hass)
@@ -66,42 +62,42 @@ class TyphoonSensor(Entity):
                         html = await response.text()
                         _LOGGER.debug("Response received, length: %d", len(html))
                         soup = BeautifulSoup(html, 'html.parser')
-                        # TODO: Parse the HTML to extract typhoon data
-                        typhoon_data = self._parse_typhoon_data(soup)
-
-                        # Example: Update state and attributes
-                        self._state = typhoon_data.get("nearest_typhoon_name", "Unknown")
-                        self._attributes = {
-                            "last_eye_distance": typhoon_data.get("last_eye_distance"),
-                            "next_eye_distance": typhoon_data.get("next_eye_distance"),
-                            "classification": typhoon_data.get("classification"),
-                            "typhoon_details": typhoon_data.get("details")
-                        }
-                        _LOGGER.debug("Update finished. State: %s, Attributes: %s", self._state, self._attributes)
+                        return self._parse_typhoon_data(soup)
                     else:
                         _LOGGER.warning("Failed to fetch data: %s", response.status)
+                        return self._get_empty_data()
         except Exception as err:
-             # Handle timeouts or other errors appropriately for HA (usually just log and keep old state or set to unavailable)
              _LOGGER.error("Error updating typhoon sensor: %s", err)
-             self._state = "Unavailable"
+             return self._get_empty_data()
+
+    def _get_empty_data(self):
+        return {
+            "name": "No typhoon detected",
+            "classification": "None",
+            "distance": None,
+            "details": "No active typhoon detected"
+        }
 
     def _parse_typhoon_data(self, soup):
         """Parse the PAGASA HTML to extract typhoon data."""
+        _LOGGER.debug("Parsing typhoon data from HTML")
         typhoons = []
 
         # Find the relevant section containing typhoon information
         typhoon_sections = soup.find_all("div", class_="tropical-cyclone-weather-bulletin-page")
+        _LOGGER.debug("Found %d typhoon sections", len(typhoon_sections))
+
         for section in typhoon_sections:
             # Extract typhoon name and classification
             typhoon_name_tag = section.find("h3")
             _LOGGER.debug("Typhoon name tag: %s", typhoon_name_tag)
             classification = "Unknown"
+            typhoon_name = "Unknown"
+            
             if typhoon_name_tag:
                 full_text = typhoon_name_tag.get_text(strip=True)
-                _LOGGER.debug("Full text: %s", full_text)
                 if '"' in full_text:
                     parts = full_text.split('"')
-                    _LOGGER.debug("Parts: %s", parts)
                     if len(parts) >= 2:
                         classification = parts[0].strip()
                         typhoon_name = parts[1].strip()
@@ -109,15 +105,13 @@ class TyphoonSensor(Entity):
                         typhoon_name = full_text
                 else:
                     typhoon_name = full_text
-            else:
-                typhoon_name = "Unknown"
-
+            
             # Extract details
             details_tag = section.find("p")
             _LOGGER.debug("Details tag: %s", details_tag)
             details = details_tag.get_text(strip=True) if details_tag else "No details available"
 
-            # Extract coordinates from the details (example: "Lat: 12.3, Lon: 123.4" or "(08.7 °N, 127.2 °E )")
+            # Extract coordinates
             lat, lon = None, None
             
             # Try regex match first for (Lat °N, Lon °E) format
@@ -149,30 +143,119 @@ class TyphoonSensor(Entity):
                     "coordinates": (lat, lon),
                     "details": details
                 })
+            else:
+                 _LOGGER.debug("Skipping %s due to missing coordinates", typhoon_name)
 
         # Find the nearest typhoon to the home coordinates
         nearest_typhoon = None
         nearest_distance = float("inf")
-        _LOGGER.debug("Home coordinates: %s", self._home_coords)
+        _LOGGER.debug("Home coordinates: %s", self.home_coords)
         for typhoon in typhoons:
-            distance = haversine(self._home_coords, typhoon["coordinates"])
+            distance = haversine(self.home_coords, typhoon["coordinates"])
             _LOGGER.debug("Typhoon: %s, Distance: %s", typhoon["name"], distance)
             if distance < nearest_distance:
                 nearest_distance = distance
                 nearest_typhoon = typhoon
-
+        
         if nearest_typhoon:
-            _LOGGER.debug("Nearest typhoon: %s", nearest_typhoon["name"])
+            _LOGGER.debug("Nearest typhoon: %s at %s km", nearest_typhoon["name"], nearest_distance)
             return {
-                "nearest_typhoon_name": nearest_typhoon["name"],
-                "last_eye_distance": nearest_distance,
-                "next_eye_distance": nearest_distance - 10,  # Example calculation
+                "name": nearest_typhoon["name"],
+                "classification": nearest_typhoon["classification"],
+                "distance": nearest_distance,
                 "details": nearest_typhoon["details"]
             }
+        
+        _LOGGER.debug("No typhoons detected or parsed")
+        return self._get_empty_data()
 
-        return {
-            "nearest_typhoon_name": "No typhoon detected",
-            "last_eye_distance": None,
-            "next_eye_distance": None,
-            "details": None
-        }
+
+class TyphoonBaseSensor(CoordinatorEntity, Entity):
+    """Base class for Typhoon sensors."""
+    
+    def __init__(self, coordinator):
+        super().__init__(coordinator)
+        self._coordinator = coordinator
+
+    @property
+    def available(self):
+        return self._coordinator.last_update_success
+
+class TyphoonNameSensor(TyphoonBaseSensor):
+    @property
+    def name(self):
+        return "Typhoon Name"
+    
+    @property
+    def unique_id(self):
+        return f"{DOMAIN}_name"
+    
+    @property
+    def state(self):
+        return self._coordinator.data.get("name")
+    
+    @property
+    def icon(self):
+        return "mdi:weather-hurricane"
+
+class TyphoonClassificationSensor(TyphoonBaseSensor):
+    @property
+    def name(self):
+        return "Typhoon Classification"
+    
+    @property
+    def unique_id(self):
+        return f"{DOMAIN}_classification"
+    
+    @property
+    def state(self):
+        return self._coordinator.data.get("classification")
+    
+    @property
+    def icon(self):
+        return "mdi:alert-circle-outline"
+
+class TyphoonDistanceSensor(TyphoonBaseSensor):
+    @property
+    def name(self):
+        return "Typhoon Distance"
+    
+    @property
+    def unique_id(self):
+        return f"{DOMAIN}_distance"
+    
+    @property
+    def state(self):
+        dist = self._coordinator.data.get("distance")
+        return round(dist, 2) if dist else None
+    
+    @property
+    def unit_of_measurement(self):
+        return "km"
+        
+    @property
+    def icon(self):
+        return "mdi:map-marker-distance"
+
+class TyphoonDetailsSensor(TyphoonBaseSensor):
+    @property
+    def name(self):
+        return "Typhoon Details"
+    
+    @property
+    def unique_id(self):
+        return f"{DOMAIN}_details"
+    
+    @property
+    def state(self):
+        # State limited to 255 chars, use attribute for full text if needed or truncate
+        details = self._coordinator.data.get("details")
+        return details[:255] if details else "No details"
+    
+    @property
+    def extra_state_attributes(self):
+        return {"full_details": self._coordinator.data.get("details")}
+    
+    @property
+    def icon(self):
+        return "mdi:text-box-outline"
