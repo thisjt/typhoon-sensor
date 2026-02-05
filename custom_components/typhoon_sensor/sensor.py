@@ -9,9 +9,11 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import async_timeout
 from bs4 import BeautifulSoup
 from haversine import haversine
+from datetime import timedelta
 import logging
 
 DOMAIN = "typhoon_sensor"
+SCAN_INTERVAL = timedelta(minutes=30)
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
