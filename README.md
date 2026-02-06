@@ -1,51 +1,69 @@
-# Typhoon Sensor Home Assistant Integration
+# Typhoon Sensor for Home Assistant
+
+![Typhoon Sensor Logo](logo/typhoon_sensor.png)
 
 ## Overview
-The Typhoon Sensor is a custom Home Assistant integration that provides real-time information about tropical cyclones in the Philippines. It fetches data from the PAGASA Severe Weather Bulletin and calculates the distance of the nearest typhoon's eye from your home coordinates. This integration is designed to help you automate actions, such as managing your solar battery system, in preparation for potential blackouts caused by typhoons.
+The **Typhoon Sensor** is a custom Home Assistant integration that provides real-time tracking of tropical cyclones in the Philippines. It scrapes the [PAGASA Severe Weather Bulletin](https://www.pagasa.dost.gov.ph/tropical-cyclone/severe-weather-bulletin) to give you critical data such as the typhoon's distance from your home, wind strength, movement, and track images.
+
+This integration is perfect for automating home preparations (e.g., charging batteries, notifying family) based on the proximity and severity of a typhoon.
 
 ## Features
-- **Real-time Typhoon Data**: Fetches the latest typhoon information from PAGASA.
-- **Distance Calculation**: Calculates the distance of the typhoon's eye from your home.
-- **Multiple Typhoon Support**: Tracks multiple typhoons and identifies the nearest one.
-- **Custom Sensors**:
-  - `sensor.typhoon_name`: Name of the nearest typhoon.
-  - `sensor.typhoon_last_eye_distance`: Distance of the typhoon's eye from your home.
-  - `sensor.typhoon_next_eye_distance`: Predicted distance of the typhoon's eye in the next update.
+- **Real-time Data**: Fetches the latest bulletin directly from PAGASA.
+- **Smart Polling**: Automatically schedules updates based on the next advisory time to optimize resources.
+- **Distance Calculation**: Calculates the distance (km) of the typhoon's eye from your home.
+- **Rich Sensor Data**:
+  - **Name & Classification**: e.g., "Kristine" (Severe Tropical Storm).
+  - **Location**: Lat/Lon coordinates and specific location details.
+  - **Wind Strength**: Max sustained winds and gustiness (km/h).
+  - **Movement**: Direction and speed (e.g., "West Northwestward at 15 km/h").
+  - **Visuals**: Accurate track image from PAGASA.
+  - **Timestamps**: Advisory issuance time and next scheduled advisory.
+- **Manual Control**: Includes a button to force a data refresh.
 
 ## Installation
-1. Clone this repository into your Home Assistant `custom_components` directory:
-   ```
-   git clone https://github.com/your-repo/typhoon-sensor.git custom_components/typhoon_sensor
-   ```
-2. Restart your Home Assistant instance.
-3. Add the Typhoon Sensor integration via the Home Assistant UI.
+
+### Method 1: HACS (Recommended)
+1. Ensure [HACS](https://hacs.xyz/) is installed.
+2. Go to **HACS > Integrations**.
+3. Click the menu (three dots) > **Custom repositories**.
+4. Add the URL of this repository and select **Integration** as the category.
+5. Click **Add**.
+6. Search for "Typhoon Sensor" and click **Download**.
+7. Restart Home Assistant.
+
+### Method 2: Manual Installation
+1. Download the `typhoon_sensor` folder from this repository.
+2. Copy it to your Home Assistant's `config/custom_components/` directory.
+3. Restart Home Assistant.
 
 ## Configuration
-1. Go to **Settings > Devices & Services > Add Integration**.
-2. Search for "Typhoon Sensor" and select it.
-3. Enter your home coordinates (latitude and longitude) when prompted.
+1. Go to **Settings > Devices & Services**.
+2. Click **Add Integration** and search for **Typhoon Sensor**.
+3. Enter the following details:
+   - **Latitude & Longitude**: Your home coordinates (defaults to your HA zone).
+   - **Scan Interval**: How often to check for updates (default: 30 minutes).
+   - **Enable Smart Polling**: Check this (recommended) to automatically schedule updates based on the "Next Advisory" time in the bulletin, reducing unnecessary web traffic.
 
-## Example Automation
-Here is an example automation to trigger your solar battery system based on the typhoon's proximity:
+## Entities
+The integration creates a device named **Typhoon Sensor** with the following entities:
 
-```yaml
-alias: "Prepare for Typhoon"
-trigger:
-  - platform: numeric_state
-    entity_id: sensor.typhoon_last_eye_distance
-    below: 100
-action:
-  - service: switch.turn_on
-    target:
-      entity_id: switch.solar_battery_charge
-mode: single
-```
+| Entity ID | Name | Description |
+| :--- | :--- | :--- |
+| `sensor.typhoon_name` | Typhoon Name | Name of the active typhoon. |
+| `sensor.typhoon_classification` | Classification | e.g., Tropical Depression, Typhoon. |
+| `sensor.typhoon_distance` | Typhoon Distance | Distance from your home in km. |
+| `sensor.typhoon_image` | Typhoon Image | Track image URL. |
+| `sensor.typhoon_movement` | Typhoon Movement | Direction and speed. |
+| `sensor.typhoon_maximum_sustained_winds` | Max Sustained Winds | Wind speed in km/h. |
+| `sensor.typhoon_gustiness` | Gustiness | Gust speed in km/h. |
+| `sensor.typhoon_advisory_time` | Advisory Time | When the bulletin was issued. |
+| `sensor.typhoon_next_advisory_time` | Next Advisory Time | When the next bulletin is expected. |
+| `button.typhoon_manual_refresh` | Manual Refresh | Press to force an immediate update. |
 
 ## Dependencies
-This integration requires the following Python libraries:
-- `requests`
-- `beautifulsoup4`
-- `haversine`
+This integration automatically installs:
+- `beautifulsoup4` (for parsing HTML)
+- `haversine` (for distance calculation)
 
 ## License
-This project is licensed under the MIT License.
+MIT License
