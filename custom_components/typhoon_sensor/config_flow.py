@@ -35,6 +35,9 @@ class TyphoonSensorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(
                         "scan_interval", default=DEFAULT_SCAN_INTERVAL
                     ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
+                    vol.Optional(
+                        "smart_polling", default=False
+                    ): bool,
                 }
             ),
         )

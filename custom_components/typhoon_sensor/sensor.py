@@ -10,6 +10,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import async_timeout
 from bs4 import BeautifulSoup
+from homeassistant.util import dt as dt_util
+from homeassistant.helpers.event import async_track_point_in_time
 from haversine import haversine
 from datetime import timedelta
 import logging
@@ -40,14 +42,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 class TyphoonDataCoordinator(DataUpdateCoordinator):
     """Class to manage fetching Typhoon data."""
 
-    def __init__(self, hass, home_lat, home_lon, scan_interval):
+    def __init__(self, hass, home_lat, home_lon, scan_interval, smart_polling=False):
         """Initialize."""
         self.home_coords = (home_lat, home_lon)
+        self.smart_polling = smart_polling
+        self.scan_interval = scan_interval
+        self._unsub_schedule = None
+        
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(minutes=scan_interval),
+            update_interval=timedelta(minutes=scan_interval) if not smart_polling else timedelta(hours=4),
         )
 
     async def _async_update_data(self):
@@ -225,6 +231,21 @@ class TyphoonDataCoordinator(DataUpdateCoordinator):
                 nearest_distance = distance
                 nearest_typhoon = typhoon
         
+                "advisory_time": nearest_typhoon["advisory_time"],
+                "next_advisory_time": nearest_typhoon["next_advisory_time"],
+            }
+        
+        # Schedule next update if smart polling is enabled
+        if self.smart_polling and nearest_typhoon and nearest_typhoon["next_advisory_time"]:
+            self._schedule_next_refresh(nearest_typhoon["next_advisory_time"])
+            
+                "next_advisory_time": nearest_typhoon["next_advisory_time"],
+            }
+        
+        # Schedule next update if smart polling is enabled
+        if self.smart_polling and nearest_typhoon and nearest_typhoon["next_advisory_time"]:
+            self._schedule_next_refresh(nearest_typhoon["next_advisory_time"])
+            
         if nearest_typhoon:
             return {
                 "name": nearest_typhoon["name"],
