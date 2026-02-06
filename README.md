@@ -23,6 +23,8 @@ This integration is perfect for automating home preparations (e.g., charging bat
 ## Installation
 
 ### Method 1: HACS (Recommended)
+We have yet to submit this module to the HACS repository. In the meantime, you can install it manually or use the custom repositories feature of HACS.
+
 1. Ensure [HACS](https://hacs.xyz/) is installed.
 2. Go to **HACS > Integrations**.
 3. Click the menu (three dots) > **Custom repositories**.
