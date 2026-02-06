@@ -231,17 +231,6 @@ class TyphoonDataCoordinator(DataUpdateCoordinator):
                 nearest_distance = distance
                 nearest_typhoon = typhoon
         
-                "advisory_time": nearest_typhoon["advisory_time"],
-                "next_advisory_time": nearest_typhoon["next_advisory_time"],
-            }
-        
-        # Schedule next update if smart polling is enabled
-        if self.smart_polling and nearest_typhoon and nearest_typhoon["next_advisory_time"]:
-            self._schedule_next_refresh(nearest_typhoon["next_advisory_time"])
-            
-                "next_advisory_time": nearest_typhoon["next_advisory_time"],
-            }
-        
         # Schedule next update if smart polling is enabled
         if self.smart_polling and nearest_typhoon and nearest_typhoon["next_advisory_time"]:
             self._schedule_next_refresh(nearest_typhoon["next_advisory_time"])
