@@ -17,7 +17,6 @@ import re
 
 from .const import DOMAIN
 
-SCAN_INTERVAL = timedelta(minutes=30)
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
@@ -28,7 +27,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         TyphoonNameSensor(coordinator, entry),
         TyphoonClassificationSensor(coordinator, entry),
         TyphoonDistanceSensor(coordinator, entry),
-        TyphoonLastDistanceSensor(coordinator, entry),
         TyphoonDetailsSensor(coordinator, entry),
     ]
     async_add_entities(sensors, True)
@@ -36,16 +34,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 class TyphoonDataCoordinator(DataUpdateCoordinator):
     """Class to manage fetching Typhoon data."""
 
-    def __init__(self, hass, home_lat, home_lon):
+    def __init__(self, hass, home_lat, home_lon, scan_interval):
         """Initialize."""
         self.home_coords = (home_lat, home_lon)
-        # Initialize last_recorded_distance with None or a default value
-        self.last_recorded_distance = None
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=SCAN_INTERVAL,
+            update_interval=timedelta(minutes=scan_interval),
         )
 
     async def _async_update_data(self):
@@ -63,34 +59,7 @@ class TyphoonDataCoordinator(DataUpdateCoordinator):
                         html = await response.text()
                         _LOGGER.debug("Response received, length: %d", len(html))
                         soup = BeautifulSoup(html, 'html.parser')
-                        data = self._parse_typhoon_data(soup)
-                        
-                        # Update last_recorded_distance logic
-                        current_distance = data.get("distance")
-                        
-                        # If we have a current distance, update last_recorded_distance
-                        # But we need to handle the case where this is the FIRST run.
-                        # If it's the first run (last is None), set last to current.
-                        # If it's not the first run, we keep the previous 'last' until... 
-                        # actually, the requirement is "last distance recorded once the distance updates".
-                        # This implies we need to store the PREVIOUS value before updating the current one.
-                        
-                        # However, _async_update_data returns the NEW state.
-                        # So we need to store the OLD state somewhere before returning the NEW state.
-                        # But wait, self.data holds the OLD state (from previous update).
-                        
-                        if self.data and "distance" in self.data:
-                             # We have previous data
-                             previous_distance = self.data["distance"]
-                             if previous_distance is not None:
-                                 self.last_recorded_distance = previous_distance
-                        
-                        # If last_recorded_distance is still None (first run), make it equal to current
-                        if self.last_recorded_distance is None and current_distance is not None:
-                            self.last_recorded_distance = current_distance
-
-                        data["last_distance"] = self.last_recorded_distance
-                        return data
+                        return self._parse_typhoon_data(soup)
                     else:
                         _LOGGER.warning("Failed to fetch data: %s", response.status)
                         return self._get_empty_data()
@@ -103,7 +72,6 @@ class TyphoonDataCoordinator(DataUpdateCoordinator):
             "name": "No typhoon detected",
             "classification": "None",
             "distance": None,
-            "last_distance": self.last_recorded_distance,
             "details": "No active typhoon detected"
         }
 
@@ -196,12 +164,7 @@ class TyphoonDataCoordinator(DataUpdateCoordinator):
             }
         
         _LOGGER.debug("No typhoons detected or parsed")
-        return {
-            "name": "No typhoon detected",
-            "classification": "None",
-            "distance": None,
-            "details": "No active typhoon detected"
-        }
+        return self._get_empty_data()
 
 
 class TyphoonBaseSensor(CoordinatorEntity, Entity):
@@ -281,28 +244,6 @@ class TyphoonDistanceSensor(TyphoonBaseSensor):
     @property
     def icon(self):
         return "mdi:map-marker-distance"
-
-class TyphoonLastDistanceSensor(TyphoonBaseSensor):
-    @property
-    def name(self):
-        return "Typhoon Last Recorded Distance"
-    
-    @property
-    def unique_id(self):
-        return f"{self._entry.entry_id}_last_distance"
-    
-    @property
-    def state(self):
-        dist = self._coordinator.data.get("last_distance")
-        return round(dist, 2) if dist else None
-    
-    @property
-    def unit_of_measurement(self):
-        return "km"
-        
-    @property
-    def icon(self):
-        return "mdi:history"
 
 class TyphoonDetailsSensor(TyphoonBaseSensor):
     @property
