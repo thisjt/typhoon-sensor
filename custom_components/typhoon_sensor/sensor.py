@@ -28,6 +28,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         TyphoonClassificationSensor(coordinator, entry),
         TyphoonDistanceSensor(coordinator, entry),
         TyphoonDetailsSensor(coordinator, entry),
+        TyphoonImageSensor(coordinator, entry),
+        TyphoonMovementSensor(coordinator, entry),
+        TyphoonSustainedWindsSensor(coordinator, entry),
+        TyphoonGustinessSensor(coordinator, entry),
+        TyphoonAdvisoryTimeSensor(coordinator, entry),
+        TyphoonNextAdvisoryTimeSensor(coordinator, entry),
     ]
     async_add_entities(sensors, True)
 
@@ -72,7 +78,13 @@ class TyphoonDataCoordinator(DataUpdateCoordinator):
             "name": "No typhoon detected",
             "classification": "None",
             "distance": None,
-            "details": "No active typhoon detected"
+            "details": "No active typhoon detected",
+            "image": None,
+            "movement": None,
+            "sustained_winds": None,
+            "gustiness": None,
+            "advisory_time": None,
+            "next_advisory_time": None,
         }
 
     def _parse_typhoon_data(self, soup):
@@ -87,7 +99,6 @@ class TyphoonDataCoordinator(DataUpdateCoordinator):
         for section in typhoon_sections:
             # Extract typhoon name and classification
             typhoon_name_tag = section.find("h3")
-            _LOGGER.debug("Typhoon name tag: %s", typhoon_name_tag)
             classification = "Unknown"
             typhoon_name = "Unknown"
             
@@ -105,65 +116,129 @@ class TyphoonDataCoordinator(DataUpdateCoordinator):
             
             # Extract details
             details_tag = section.find("p")
-            _LOGGER.debug("Details tag: %s", details_tag)
             details = details_tag.get_text(strip=True) if details_tag else "No details available"
+
+            # Helper to find panel text by heading
+            def get_panel_text(heading):
+                panels = section.find_all("div", class_="panel")
+                for panel in panels:
+                    head = panel.find("div", class_="panel-heading")
+                    if head and heading.lower() in head.get_text(strip=True).lower():
+                        body = panel.find("div", class_="panel-body")
+                        if body:
+                            return body.get_text(strip=True)
+                return None
+
+            image_url = None
+            img_tag = section.find("img", class_="img-responsive image-preview")
+            if img_tag and img_tag.get("src"):
+                src = img_tag.get("src")
+                if src.startswith("http"):
+                    image_url = src
+                else:
+                    image_url = f"https://pubfiles.pagasa.dost.gov.ph{src}" if src.startswith("/") else f"https://pubfiles.pagasa.dost.gov.ph/{src}"
+
+            movement = get_panel_text("Movement")
+            
+            strength_text = get_panel_text("Strength")
+            sustained_winds = None
+            gustiness = None
+            if strength_text:
+                sust_match = re.search(r"sustained winds of (\d+)", strength_text)
+                gust_match = re.search(r"gustiness of up to (\d+)", strength_text)
+                if sust_match: sustained_winds = int(sust_match.group(1))
+                if gust_match: gustiness = int(gust_match.group(1))
+
+            advisory_time = None
+            # Find Issued at ...
+            issued_tag = section.find("h5", style=lambda s: s and "margin-bottom" in s) # simple heuristic based on example
+            if not issued_tag:
+                # Fallback: search all h5
+                for h5 in section.find_all("h5"):
+                    if "Issued at" in h5.get_text():
+                        issued_tag = h5
+                        break
+            if issued_tag:
+                advisory_time = issued_tag.get_text(strip=True).replace("Issued at ", "")
+
+            next_advisory_time = None
+            # Find next advisory ...
+            next_tag = section.find("h5", style=lambda s: s and "margin-top" in s)
+            if not next_tag:
+                 for h5 in section.find_all("h5"):
+                    if "next advisory" in h5.get_text():
+                        next_tag = h5
+                        break
+            if next_tag:
+                 # Extract time from text like "(Valid ... issued at 11:00 PM today)"
+                 next_text = next_tag.get_text(strip=True)
+                 match = re.search(r"issued at ([\d:]+ [AP]M \w+)", next_text)
+                 if match:
+                     next_advisory_time = match.group(1)
+                 else:
+                     next_advisory_time = next_text
 
             # Extract coordinates
             lat, lon = None, None
-            
-            # Try regex match first for (Lat °N, Lon °E) format
             match = re.search(r'\(\s*(\d+\.\d+)\s*°N,\s*(\d+\.\d+)\s*°E\s*\)', details)
+            if not match:
+                 # Try location panel
+                 loc_text = get_panel_text("Location of Eye/center")
+                 if loc_text:
+                     match = re.search(r'\(\s*(\d+\.\d+)\s*°N,\s*(\d+\.\d+)\s*°E\s*\)', loc_text)
+            
             if match:
                 try:
                     lat = float(match.group(1))
                     lon = float(match.group(2))
-                    _LOGGER.debug("Coordinates found via regex: Lat=%s, Lon=%s", lat, lon)
-                except ValueError:
-                     _LOGGER.warning("Regex matched but failed to parse floats")
+                except ValueError: pass
 
             if lat is None or lon is None:
                 for line in details.split("\n"):
-                    _LOGGER.debug("Line: %s", line)
                     if "Lat:" in line and "Lon:" in line:
                         try:
                             lat = float(line.split("Lat:")[1].split(",")[0].strip())
                             lon = float(line.split("Lon:")[1].strip())
-                            _LOGGER.debug("Lat: %s, Lon: %s", lat, lon)
-                        except (ValueError, IndexError):
-                            continue
+                        except (ValueError, IndexError): continue
 
             if lat is not None and lon is not None:
-                _LOGGER.debug("Adding typhoon: %s (%s)", typhoon_name, classification)
+                _LOGGER.debug("Adding typhoon: %s", typhoon_name)
                 typhoons.append({
                     "name": typhoon_name,
                     "classification": classification,
                     "coordinates": (lat, lon),
-                    "details": details
+                    "details": details,
+                    "image": image_url,
+                    "movement": movement,
+                    "sustained_winds": sustained_winds,
+                    "gustiness": gustiness,
+                    "advisory_time": advisory_time,
+                    "next_advisory_time": next_advisory_time,
                 })
-            else:
-                 _LOGGER.debug("Skipping %s due to missing coordinates", typhoon_name)
 
-        # Find the nearest typhoon to the home coordinates
         nearest_typhoon = None
         nearest_distance = float("inf")
-        _LOGGER.debug("Home coordinates: %s", self.home_coords)
+        
         for typhoon in typhoons:
             distance = haversine(self.home_coords, typhoon["coordinates"])
-            _LOGGER.debug("Typhoon: %s, Distance: %s", typhoon["name"], distance)
             if distance < nearest_distance:
                 nearest_distance = distance
                 nearest_typhoon = typhoon
         
         if nearest_typhoon:
-            _LOGGER.debug("Nearest typhoon: %s at %s km", nearest_typhoon["name"], nearest_distance)
             return {
                 "name": nearest_typhoon["name"],
                 "classification": nearest_typhoon["classification"],
                 "distance": nearest_distance,
-                "details": nearest_typhoon["details"]
+                "details": nearest_typhoon["details"],
+                "image": nearest_typhoon["image"],
+                "movement": nearest_typhoon["movement"],
+                "sustained_winds": nearest_typhoon["sustained_winds"],
+                "gustiness": nearest_typhoon["gustiness"],
+                "advisory_time": nearest_typhoon["advisory_time"],
+                "next_advisory_time": nearest_typhoon["next_advisory_time"],
             }
         
-        _LOGGER.debug("No typhoons detected or parsed")
         return self._get_empty_data()
 
 
@@ -191,79 +266,114 @@ class TyphoonBaseSensor(CoordinatorEntity, Entity):
 
 class TyphoonNameSensor(TyphoonBaseSensor):
     @property
-    def name(self):
-        return "Typhoon Name"
-    
+    def name(self): return "Typhoon Name"
     @property
-    def unique_id(self):
-        return f"{self._entry.entry_id}_name"
-    
+    def unique_id(self): return f"{self._entry.entry_id}_name"
     @property
-    def state(self):
-        return self._coordinator.data.get("name")
-    
+    def state(self): return self._coordinator.data.get("name")
     @property
-    def icon(self):
-        return "mdi:weather-hurricane"
+    def icon(self): return "mdi:weather-hurricane"
 
 class TyphoonClassificationSensor(TyphoonBaseSensor):
     @property
-    def name(self):
-        return "Typhoon Classification"
-    
+    def name(self): return "Typhoon Classification"
     @property
-    def unique_id(self):
-        return f"{self._entry.entry_id}_classification"
-    
+    def unique_id(self): return f"{self._entry.entry_id}_classification"
     @property
-    def state(self):
-        return self._coordinator.data.get("classification")
-    
+    def state(self): return self._coordinator.data.get("classification")
     @property
-    def icon(self):
-        return "mdi:alert-circle-outline"
+    def icon(self): return "mdi:alert-circle-outline"
 
 class TyphoonDistanceSensor(TyphoonBaseSensor):
     @property
-    def name(self):
-        return "Typhoon Distance"
-    
+    def name(self): return "Typhoon Distance"
     @property
-    def unique_id(self):
-        return f"{self._entry.entry_id}_distance"
-    
+    def unique_id(self): return f"{self._entry.entry_id}_distance"
     @property
     def state(self):
         dist = self._coordinator.data.get("distance")
         return round(dist, 2) if dist else None
-    
     @property
-    def unit_of_measurement(self):
-        return "km"
-        
+    def unit_of_measurement(self): return "km"
     @property
-    def icon(self):
-        return "mdi:map-marker-distance"
+    def icon(self): return "mdi:map-marker-distance"
 
 class TyphoonDetailsSensor(TyphoonBaseSensor):
     @property
-    def name(self):
-        return "Typhoon Details"
-    
+    def name(self): return "Typhoon Details"
     @property
-    def unique_id(self):
-        return f"{self._entry.entry_id}_details"
-    
+    def unique_id(self): return f"{self._entry.entry_id}_details"
     @property
     def state(self):
-        # State limited to 255 chars, use attribute for full text if needed or truncate
         details = self._coordinator.data.get("details")
         return details[:255] if details else "No details"
-    
     @property
-    def extra_state_attributes(self):
-        return {"full_details": self._coordinator.data.get("details")}
-    
+    def extra_state_attributes(self): return {"full_details": self._coordinator.data.get("details")}
     @property
-    def icon(self):
-        return "mdi:text-box-outline"
+    def icon(self): return "mdi:text-box-outline"
+
+class TyphoonImageSensor(TyphoonBaseSensor):
+    @property
+    def name(self): return "Typhoon Image"
+    @property
+    def unique_id(self): return f"{self._entry.entry_id}_image"
+    @property
+    def state(self): return self._coordinator.data.get("image")
+    @property
+    def entity_picture(self): return self._coordinator.data.get("image")
+    @property
+    def icon(self): return "mdi:image"
+
+class TyphoonMovementSensor(TyphoonBaseSensor):
+    @property
+    def name(self): return "Typhoon Movement"
+    @property
+    def unique_id(self): return f"{self._entry.entry_id}_movement"
+    @property
+    def state(self): return self._coordinator.data.get("movement")
+    @property
+    def icon(self): return "mdi:arrow-expand-all"
+
+class TyphoonSustainedWindsSensor(TyphoonBaseSensor):
+    @property
+    def name(self): return "Typhoon Maximum Sustained Winds"
+    @property
+    def unique_id(self): return f"{self._entry.entry_id}_sustained_winds"
+    @property
+    def state(self): return self._coordinator.data.get("sustained_winds")
+    @property
+    def unit_of_measurement(self): return "km/h"
+    @property
+    def icon(self): return "mdi:weather-windy"
+
+class TyphoonGustinessSensor(TyphoonBaseSensor):
+    @property
+    def name(self): return "Typhoon Gustiness"
+    @property
+    def unique_id(self): return f"{self._entry.entry_id}_gustiness"
+    @property
+    def state(self): return self._coordinator.data.get("gustiness")
+    @property
+    def unit_of_measurement(self): return "km/h"
+    @property
+    def icon(self): return "mdi:weather-windy-variant"
+
+class TyphoonAdvisoryTimeSensor(TyphoonBaseSensor):
+    @property
+    def name(self): return "Typhoon Advisory Time"
+    @property
+    def unique_id(self): return f"{self._entry.entry_id}_advisory_time"
+    @property
+    def state(self): return self._coordinator.data.get("advisory_time")
+    @property
+    def icon(self): return "mdi:clock-outline"
+
+class TyphoonNextAdvisoryTimeSensor(TyphoonBaseSensor):
+    @property
+    def name(self): return "Typhoon Next Advisory Time"
+    @property
+    def unique_id(self): return f"{self._entry.entry_id}_next_advisory_time"
+    @property
+    def state(self): return self._coordinator.data.get("next_advisory_time")
+    @property
+    def icon(self): return "mdi:clock-time-four-outline"
