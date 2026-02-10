@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.event import async_track_point_in_time
 from haversine import haversine
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 import re
 
@@ -42,18 +42,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 class TyphoonDataCoordinator(DataUpdateCoordinator):
     """Class to manage fetching Typhoon data."""
 
-    def __init__(self, hass, home_lat, home_lon, scan_interval, smart_polling=False):
+    def __init__(self, hass, home_lat, home_lon, scan_interval, smart_polling=False, idle_poll_interval=480):
         """Initialize."""
         self.home_coords = (home_lat, home_lon)
         self.smart_polling = smart_polling
         self.scan_interval = scan_interval
+        self.idle_poll_interval = idle_poll_interval
         self._unsub_schedule = None
         
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(minutes=scan_interval) if not smart_polling else timedelta(hours=4),
+            update_interval=timedelta(minutes=scan_interval) if not smart_polling else None,
         )
 
     async def _async_update_data(self):
@@ -102,6 +103,13 @@ class TyphoonDataCoordinator(DataUpdateCoordinator):
         typhoon_sections = soup.find_all("div", class_="tropical-cyclone-weather-bulletin-page")
         _LOGGER.debug("Found %d typhoon sections", len(typhoon_sections))
 
+        if not typhoon_sections:
+            # Check for "No Active Tropical Cyclone"
+            no_active_tag = soup.find("h3", string=re.compile(r"No Active Tropical Cyclone", re.I))
+            if no_active_tag:
+                 _LOGGER.info("No active tropical cyclone detected. Scheduling idle poll.")
+                 self._schedule_next_refresh(None) # Schedule using idle_poll_interval
+        
         for section in typhoon_sections:
             # Extract typhoon name and classification
             typhoon_name_tag = section.find("h3")
@@ -250,6 +258,60 @@ class TyphoonDataCoordinator(DataUpdateCoordinator):
             }
         
         return self._get_empty_data()
+
+    def _parse_advisory_time(self, time_str):
+        """Parse advisory time string to datetime."""
+        if not time_str:
+            return None
+            
+        try:
+            # Expected format: "11:00 PM today" or "5:00 AM tomorrow"
+            match = re.search(r"([\d:]+ [AP]M) (\w+)", time_str)
+            if not match:
+                return None
+                
+            time_part = match.group(1)
+            day_part = match.group(2).lower()
+            
+            now = dt_util.now()
+            base_date = now.date()
+            if day_part == "tomorrow":
+                base_date += timedelta(days=1)
+                
+            time_obj = datetime.strptime(time_part, "%I:%M %p").time()
+            return dt_util.as_utc(datetime.combine(base_date, time_obj).replace(tzinfo=dt_util.DEFAULT_TIME_ZONE))
+        except Exception as e:
+            _LOGGER.error("Error parsing advisory time '%s': %s", time_str, e)
+            return None
+
+    def _schedule_next_refresh(self, next_advisory_str):
+        """Schedule next refresh based on advisory time or idle interval."""
+        if self._unsub_schedule:
+            self._unsub_schedule()
+            self._unsub_schedule = None
+
+        if next_advisory_str:
+            next_time = self._parse_advisory_time(next_advisory_str)
+            if next_time:
+                # Add 15 min buffer to ensure PAGASA has updated
+                target_time = next_time + timedelta(minutes=15)
+                # If target time is in the past, fall back to scan_interval
+                if target_time <= dt_util.now():
+                    target_time = dt_util.now() + timedelta(minutes=self.scan_interval)
+                    
+                _LOGGER.info("Smart polling: Scheduling next refresh for %s", target_time)
+                self._unsub_schedule = async_track_point_in_time(
+                    self.hass, self.async_request_refresh, target_time
+                )
+                return
+
+        # Fallback to idle_poll_interval or scan_interval
+        interval = self.idle_poll_interval if not next_advisory_str else self.scan_interval
+        target_time = dt_util.now() + timedelta(minutes=interval)
+        _LOGGER.info("Scheduling next refresh in %d minutes (%s)", interval, target_time)
+        self._unsub_schedule = async_track_point_in_time(
+            self.hass, self._async_refresh, target_time
+        )
 
 
 class TyphoonBaseSensor(CoordinatorEntity, Entity):

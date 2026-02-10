@@ -10,6 +10,7 @@ This integration is perfect for automating home preparations (e.g., charging bat
 ## Features
 - **Real-time Data**: Fetches the latest bulletin directly from PAGASA.
 - **Smart Polling**: Automatically schedules updates based on the next advisory time to optimize resources.
+- **Idle Polling**: Automatically reduces polling frequency when no active tropical cyclone is detected within the PAR, saving bandwidth.
 - **Distance Calculation**: Calculates the distance (km) of the typhoon's eye from your home.
 - **Rich Sensor Data**:
   - **Name & Classification**: e.g., "Kristine" (Severe Tropical Storm).
@@ -43,8 +44,9 @@ We have yet to submit this module to the HACS repository. In the meantime, you c
 2. Click **Add Integration** and search for **Typhoon Sensor**.
 3. Enter the following details:
    - **Latitude & Longitude**: Your home coordinates (defaults to your HA zone).
-   - **Scan Interval**: How often to check for updates (default: 30 minutes).
-   - **Enable Smart Polling**: Check this (recommended) to automatically schedule updates based on the "Next Advisory" time in the bulletin, reducing unnecessary web traffic.
+   - **Scan Interval**: How often to check for updates (default: 30 minutes). Used as a fallback if smart polling fails.
+   - **Enable Smart Polling**: Check this (recommended) to automatically schedule updates based on the "Next Advisory" time in the bulletin.
+   - **Idle Poll Interval**: How often to check for updates when NO active typhoon is detected (default: 480 minutes / 8 hours).
 
 ## Entities
 The integration creates a device named **Typhoon Sensor** with the following entities:

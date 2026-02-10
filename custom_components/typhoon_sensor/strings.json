@@ -8,7 +8,8 @@
           "latitude": "Latitude",
           "longitude": "Longitude",
           "scan_interval": "Scan Interval (minutes)",
-          "smart_polling": "Enable Smart Polling (schedule updates based on advisory time)"
+          "smart_polling": "Enable Smart Polling",
+          "idle_poll_interval": "Idle Poll Interval (minutes)"
         }
       }
     },

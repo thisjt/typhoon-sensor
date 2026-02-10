@@ -8,7 +8,7 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE
 import homeassistant.helpers.config_validation as cv
 
-from .const import DOMAIN, DEFAULT_SCAN_INTERVAL, MIN_SCAN_INTERVAL
+from .const import DOMAIN, DEFAULT_SCAN_INTERVAL, MIN_SCAN_INTERVAL, DEFAULT_IDLE_POLL_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,6 +38,9 @@ class TyphoonSensorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Optional(
                         "smart_polling", default=False
                     ): bool,
+                    vol.Required(
+                        "idle_poll_interval", default=DEFAULT_IDLE_POLL_INTERVAL
+                    ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
                 }
             ),
         )

@@ -17,13 +17,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     scan_interval = entry.data.get("scan_interval", DEFAULT_SCAN_INTERVAL)
     smart_polling = entry.data.get("smart_polling", False)
+    idle_poll_interval = entry.data.get("idle_poll_interval", 480)
 
     coordinator = TyphoonDataCoordinator(
         hass, 
         entry.data.get("latitude"), 
         entry.data.get("longitude"),
         scan_interval,
-        smart_polling
+        smart_polling,
+        idle_poll_interval
     )
     
     await coordinator.async_config_entry_first_refresh()
